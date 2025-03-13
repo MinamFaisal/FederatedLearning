@@ -26,21 +26,30 @@ else:
 # -------------------------------------------------------------------
 # 2) CLIENT CLASS - SENDS/RECEIVES PARAMETERS AND RETAINS KNOWLEDGE
 # -------------------------------------------------------------------
+
+
+def print_model_weights(tag, weights):
+    """Print the first few elements of model weights for debugging."""
+    print(f"\n🔍 {tag}:")
+    for i, w in enumerate(weights):
+        print(f"Layer {i}: {w.shape} -> {w.flatten()[:5]} ...")  # Print first 5 values
+
 class MalwareClient(fl.client.NumPyClient):
+    
     def get_parameters(self, config):
-        """Send the latest client model parameters to the server without training."""
-        return [param.tolist() for param in model.get_weights()]
+        """Send the latest client model parameters to the server."""
+        weights = model.get_weights()
+        print_model_weights("📤 Client Sending Weights", weights)  # Print before sending
+        return [param.tolist() for param in weights]
 
     def set_parameters(self, parameters):
-        """Receive aggregated weights from the server and retain previous knowledge."""
-        previous_weights = model.get_weights()
+        """Receive aggregated weights from the server."""
+        print_model_weights("📥 Before Updating", model.get_weights())  # Print current weights
         new_weights = [np.array(param) for param in parameters]
+        model.set_weights(new_weights)
+        model.save(model_path)
+        print_model_weights("📥 After Updating", new_weights)  # Print updated weights
 
-        # Merge new and previous weights (retain knowledge)
-        updated_weights = [(p + n) / 2 for p, n in zip(previous_weights, new_weights)]
-        model.set_weights(updated_weights)
-        model.save(model_path)  # Save new updated model
-        print(f"🔄 [Client {client_id}] Retained previous knowledge and applied new parameters.")
 
     def fit(self, parameters, config):
         """Participate in FL round even if no updates are available."""
@@ -114,8 +123,12 @@ def listen():
             prediction = "Malicious" if prediction_prob[0][0] > 0.5 else "Benign"
 
             # Save prediction results
+            num_features = features_array.shape[1]  # Get the actual feature count dynamically
+
             df = pd.DataFrame([[*features_array.flatten(), prediction]], 
-                              columns=[f"feature_{i}" for i in range(12)] + ["prediction"])
+                  columns=[f"feature_{i}" for i in range(num_features)] + ["prediction"])
+
+
             df.to_csv(results_file, mode='a', header=not os.path.exists(results_file), index=False)
 
             print(f"🔍 Prediction: {prediction}")
