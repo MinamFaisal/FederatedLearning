@@ -49,7 +49,6 @@ class MalwareClient(fl.client.NumPyClient):
         model.save(model_path)
         print_model_weights("📥 After Updating", new_weights)  # Print updated weights
 
-
     def fit(self, parameters, config):
         """Participate in FL round even if no updates are available."""
         self.set_parameters(parameters)  # ✅ Load latest aggregated weights
@@ -66,9 +65,9 @@ class MalwareClient(fl.client.NumPyClient):
                 df = pd.read_csv(results_file)
 
                 if len(df) > 0:
-                    X_train = df.iloc[:, :-1].values.astype(np.float32)
+                    X_train = df.iloc[:, :-2].values.astype(np.float32)
                     X_train = (X_train - X_train.min(axis=0)) / (X_train.max(axis=0) - X_train.min(axis=0) + 1e-7)  # Normalize
-                    y_train = (df.iloc[:, -1] == "Malicious").astype(int).values.reshape(-1, 1)
+                    y_train = (df.iloc[:, -2] == "Malicious").astype(int).values.reshape(-1, 1)
 
                     # Continue training with previous knowledge
                     model.fit(X_train, y_train, epochs=5, batch_size=4, verbose=1)
@@ -88,12 +87,13 @@ class MalwareClient(fl.client.NumPyClient):
         if os.path.exists(results_file):
             df = pd.read_csv(results_file)
             if len(df) > 0:
-                X_eval = df.iloc[:, :-1].values.astype(np.float32)
+                X_eval = df.iloc[:, :-2].values.astype(np.float32)
                 X_eval = (X_eval - X_eval.min(axis=0)) / (X_eval.max(axis=0) - X_eval.min(axis=0) + 1e-7)  # Normalize
-                y_true = (df.iloc[:, -1] == "Malicious").astype(int).values  # Convert labels
+                y_true = (df.iloc[:, -2] == "Malicious").astype(int).values  # Convert labels
 
                 # Get predictions
-                y_pred = (model.predict(X_eval) > 0.5).astype(np.int32).flatten()
+                y_prob = model.predict(X_eval).flatten()
+                y_pred = (y_prob > 0.5).astype(np.int32)
 
                 # Calculate evaluation metrics
                 f1 = f1_score(y_true, y_pred, zero_division=1)
@@ -118,19 +118,17 @@ def listen():
             features_array = np.load("selected_features.npy")
             
             # ✅ Use the saved model for prediction
-            prediction_prob = model.predict(features_array)
-            prediction = "Malicious" if prediction_prob[0][0] > 0.5 else "Benign"
+            prediction_prob = model.predict(features_array)[0][0]  # Get probability score
+            prediction = "Malicious" if prediction_prob > 0.5 else "Benign"
 
-            # Save prediction results
+            # Save prediction results with confidence score
             num_features = features_array.shape[1]  # Get the actual feature count dynamically
-
-            df = pd.DataFrame([[*features_array.flatten(), prediction]], 
-                  columns=[f"feature_{i}" for i in range(num_features)] + ["prediction"])
-
+            df = pd.DataFrame([[*features_array.flatten(), prediction, prediction_prob]], 
+                  columns=[f"feature_{i}" for i in range(num_features)] + ["prediction", "confidence_score"])
 
             df.to_csv(results_file, mode='a', header=not os.path.exists(results_file), index=False)
 
-            print(f"🔍 Prediction: {prediction}")
+            print(f"🔍 Prediction: {prediction} (Confidence: {prediction_prob:.4f})")
             os.remove(predict_request_file)
 
             # Increment update counter safely
